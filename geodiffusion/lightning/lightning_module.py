@@ -58,8 +58,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
 import torch
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
@@ -71,7 +69,6 @@ from geodiffusion.matching.matcher import build_targets
 from geodiffusion.losses.losses import DistanceLoss, ActiveLoss, ConnectivityLoss
 from geodiffusion.metrics.segment_metrics import (
     segment_precision_recall_f1,
-    pr_curve,
     pi_dist_matrix,
     segment_density_bucket,
     DENSITY_BUCKETS,

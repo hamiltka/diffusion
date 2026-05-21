@@ -25,8 +25,10 @@ node_eps: 0.03   # distance threshold for declaring two GT endpoints as shared (
 endpoint_cluster_radius: 0.03  # distance threshold for "nearby" endpoints in normalised coords
 endpoint_cluster_active_threshold: 0.0  # only consider endpoints with active_score > this
 
-# Class-imbalance correction for active channel (~93% inactive vs ~7% active).
+# Class-imbalance correction for active channel (~94.6% inactive vs ~5.4% active).
 # Correct formula: (1 - match_fraction) / match_fraction.
-# At 7% match rate: 0.93/0.07 ≈ 13.  Previous value of 5.0 was insufficient —
-# all trained checkpoints collapsed to all-inactive.
-active_pos_weight: 13.0
+# Measured match fraction: 82.6/1536 ≈ 5.4%  →  0.946/0.054 ≈ 17.5.
+# Previous value of 5.0 was insufficient — all trained checkpoints collapsed to all-inactive.
+# NOTE: with the gt_seeded fix (deterministic spoke aligned to Hungarian), active velocities
+# should now be ≈0 in training, so pos_weight primarily governs the small residual error.
+active_pos_weight: 18.0

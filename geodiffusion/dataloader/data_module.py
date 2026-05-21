@@ -12,27 +12,22 @@ from torch.utils.data import DataLoader, default_collate
 
 from geodiffusion.dataloader.dataset import VectorRoadDataset
 
-
+# Called once per DataLoader worker process at spawn time (multi-GPU / multi-worker).
+# Each worker is a separate subprocess that inherits the parent's environment, so
+# without this hook every worker would launch its own GDAL/OMP/MKL thread pools —
+# causing severe CPU oversubscription on shared HPC nodes.
 def _worker_init_fn(worker_id: int) -> None:
     """Limit native thread pools inside DataLoader workers to avoid thread exhaustion."""
-    # Keep each worker process single-threaded to avoid oversubscribing CPU cores.
-    os.environ["GDAL_NUM_THREADS"] = "1"
-    # NOTE: Do NOT set GDAL_DISABLE_READDIR_ON_OPEN here — the USGS JPEG
-    # satellite images store their CRS/georeference in .jpg.aux.xml sidecar
-    # files.  Disabling directory reads prevents GDAL from discovering those
-    # sidecars, causing rasterio to open images without georeference info and
-    # producing zero valid road segments from every sample.
+    os.environ["GDAL_NUM_THREADS"] = "1"   # hard override (not setdefault — must take effect)
+    # NOTE: do NOT add GDAL_DISABLE_READDIR_ON_OPEN here; rasterio needs directory
+    # reads to find the .jpg.aux.xml sidecar that carries the image CRS/georeference.
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     try:
-        import cv2
-        cv2.setNumThreads(0)
+        import cv2; cv2.setNumThreads(0)    # optional dep — skip if not installed
     except Exception:
         pass
-    try:
-        torch.set_num_threads(1)
-    except Exception:
-        pass
+    torch.set_num_threads(1)                # torch always importable; no try/except needed
 
 
 def _collate(batch):
@@ -51,12 +46,12 @@ class VectorDiffusionDataModule(pl.LightningDataModule):
 
     Config keys used (new ``data`` namespace)::
 
-        cfg.data.data_root
-        cfg.data.max_gt_segments
-        cfg.data.max_train_samples   (optional)
-        cfg.data.max_val_samples     (optional)
-        cfg.data.densify             (optional, default True)
-        cfg.data.max_segment_length  (optional, default 0.10)
+        cfg.data.data_root       (e.g. "/path/to/processed/dataset/root")
+        cfg.data.max_gt_segments (optional, default 100)  # max segments per image after filtering
+        cfg.data.max_train_samples   (optional, default None, i.e. no cap) 
+        cfg.data.max_val_samples     (optional, default None, i.e. no cap)
+        cfg.data.densify             (optional, default False)
+        cfg.data.max_segment_length  (optional, default 0.10)  # 0.10 ≈ 51 m at 512 px / 1 m GSD
         cfg.training.batch_size
         cfg.training.num_workers
     """
@@ -67,54 +62,26 @@ class VectorDiffusionDataModule(pl.LightningDataModule):
         self.train_dataset: VectorRoadDataset | None = None
         self.val_dataset: VectorRoadDataset | None = None
 
+    # Build train/val VectorRoadDataset objects from config for Lightning
     def setup(self, stage: str | None = None):
         d = self.cfg.data
-        # Shared dataset construction kwargs for both train/val splits.
-        # These are all data-quality and geometry-normalization controls.
         kwargs = dict(
             data_root=d.data_root,
             max_gt_segments=d.max_gt_segments,
-            densify=bool(d.get("densify", True)),
+            densify=bool(d.get("densify", False)),
             max_segment_length=float(d.get("max_segment_length", 0.10)),
             image_size=int(d.get("image_size", 512)),
             gsd_m=float(d.get("gsd_m", 1.0)),
-            min_valid_features_train=int(d.get("min_valid_features_train", 0)),
-            min_valid_features_val=int(d.get("min_valid_features_val", 0)),
-            max_valid_features_train=int(d.get("max_valid_features_train", 0)),
-            max_valid_features_val=int(d.get("max_valid_features_val", 0)),
-            filter_nodata=bool(d.get("filter_nodata", False)),
-            nodata_threshold=float(d.get("nodata_threshold", 0.30)),
-            nodata_white_threshold=int(d.get("nodata_white_threshold", 250)),
-            nodata_black_threshold=int(d.get("nodata_black_threshold", 5)),
             use_exclusion_csv=bool(d.get("use_exclusion_csv", False)),
             exclusion_csv_path=d.get("exclusion_csv_path", None),
-            use_source_blocklist=bool(d.get("use_source_blocklist", False)),
-            blocklist_path=d.get("blocklist_path", None),
-            augment=d.get("augment", None),  # None = auto (train=True, val=False)
         )
         if stage in ("fit", None):
-            # Build train split with optional cap for quick experiments.
-            self.train_dataset = VectorRoadDataset(
-                split="train",
-                max_samples=d.get("max_train_samples", None),
-                **kwargs,
-            )
-            # Build val split separately so filtering stats are measured per split.
-            self.val_dataset = VectorRoadDataset(
-                split="val",
-                max_samples=d.get("max_val_samples", None),
-                **kwargs,
-            )
-            # Avoid duplicate table output from all DDP ranks.
+            self.train_dataset = VectorRoadDataset(split="train", **kwargs)
+            self.val_dataset = VectorRoadDataset(split="val", **kwargs)
             if os.environ.get("LOCAL_RANK", "0") == "0":
                 self._print_dataset_summary()
         elif stage == "validate" and self.val_dataset is None:
-            # Support validate-only entrypoints that never called fit().
-            self.val_dataset = VectorRoadDataset(
-                split="val",
-                max_samples=d.get("max_val_samples", None),
-                **kwargs,
-            )
+            self.val_dataset = VectorRoadDataset(split="val", **kwargs)
 
     def _print_dataset_summary(self) -> None:
         # Convenience aliases for a compact table definition.
@@ -137,42 +104,10 @@ class VectorDiffusionDataModule(pl.LightningDataModule):
         tbl.add_row("Max seg length",  f"~{tr._seg_m:.0f} m", "")
         tbl.add_row("Road type filter", "19 driveable types", "")
         tbl.add_row(
-            "Min valid features",
-            str(getattr(tr, "min_valid_features_train", 0)),
-            str(getattr(va, "min_valid_features_val", 0)),
-        )
-        tbl.add_row(
-            "Max valid features",
-            str(getattr(tr, "max_valid_features_train", 0)),
-            str(getattr(va, "max_valid_features_val", 0)),
-        )
-        tbl.add_row(
-            "Sparse removed",
-            str(getattr(tr, "_n_removed_sparse", 0)),
-            str(getattr(va, "_n_removed_sparse", 0)),
-        )
-        tbl.add_row(
-            "Dense removed",
-            str(getattr(tr, "_n_removed_dense", 0)),
-            str(getattr(va, "_n_removed_dense", 0)),
-        )
-        tbl.add_row(
-            "No-data removed",
-            str(getattr(tr, "_n_removed_nodata", 0)),
-            str(getattr(va, "_n_removed_nodata", 0)),
-        )
-        tbl.add_row(
             "CSV removed",
             str(getattr(tr, "_n_removed_exclusion_csv", 0)),
             str(getattr(va, "_n_removed_exclusion_csv", 0)),
         )
-        tbl.add_row(
-            "Blocklist removed",
-            str(getattr(tr, "_n_removed_blocklist", 0)),
-            str(getattr(va, "_n_removed_blocklist", 0)),
-        )
-        # Augmentations are only active in train split by dataset design.
-        tbl.add_row("Augmentations",   "hflip  vflip  rot90  colorjitter  occlusion", "[dim]disabled[/]")
         Console().print(tbl)
 
     def _loader(self, dataset: VectorRoadDataset, shuffle: bool) -> DataLoader:

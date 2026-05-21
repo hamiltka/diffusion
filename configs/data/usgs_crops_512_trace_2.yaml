@@ -4,7 +4,7 @@
 data_root: "${oc.env:DATA_ROOT,/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP}"
 image_size: 512              # pixels per side
 gsd_m: 1.0                   # ground sample distance (metres per pixel)
-max_gt_segments: 1500        # GT segments per image — raised for 15m densification
+max_gt_segments: 800         # post-densification p99=710 measured on val; samples above are dropped (not truncated)
 max_segment_length: 0.06     # max normalised segment length before densification (~15 m at 1m/px)
 densify: true
 
@@ -19,9 +19,7 @@ nodata_threshold: 0.30        # matches segmentation no-data filter (30%)
 nodata_white_threshold: 250   # pixel > 250 in all channels counts as near-white
 nodata_black_threshold: 5     # pixel < 5 in all channels counts as near-black
 use_exclusion_csv: true
-exclusion_csv_path: "${oc.env:EXCLUSION_CSV_PATH,/home/hamiltka/trace-segmentation-train/maptrace/excluded_crops.csv}"
-use_source_blocklist: false   # blocklist uses old named-source IDs, not compatible with current numeric-ID dataset
-blocklist_path: "${oc.env:BLOCKLIST_PATH,/home/hamiltka/trace-segmentation-train/maptrace/datasets/blocklists/outlier_sources_epoch10.csv}"
+exclusion_csv_path: "${paths.exclusion_csv}"
 
 max_train_samples: null      # null = use all
 max_val_samples: null        # null = use all (4241 images)

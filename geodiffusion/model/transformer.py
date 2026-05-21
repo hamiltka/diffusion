@@ -2,16 +2,16 @@
 Transformer-based velocity-field model for vector road-network flow matching.
 
 Architecture:
-  - Per-segment linear embedding  (5 → 512)
-  - Learnable positional embeddings
-  - Continuous timestep embedding  (t ∈ [0,1] → sinusoidal → 512)
-  - 8 × CrossAttentionBlock (self-attn on segments + cross-attn to image features)
-  - DeepLabV3-ResNet101 image encoder
-  - Single velocity prediction head  (512 → 5)
+    - Per-segment linear embedding  (5 → 512)
+    - Learnable positional embeddings
+    - Continuous timestep embedding  (t ∈ [0,1] → sinusoidal → 512)
+    - 8 × CrossAttentionBlock (self-attn on segments + cross-attn to image features)
+    - DeepLabV3-ResNet101 image encoder
+    - Single velocity prediction head  (512 → 5)
 
 The model predicts the flow velocity v_θ(x_t, t, image) ≈ x₁ − x₀ for all
-5 channels: (x1, y1, x2, y2, active).  There is no separate mask head —
-the active channel is just the 5th velocity component.
+5 channels: (x1, y1, x2, y2, active). There is no separate mask head —
+the active channel is just the 5th velocity component ("active").
 """
 import math
 
@@ -58,6 +58,7 @@ class ImageConditioningUNet(nn.Module):
     """DeepLabV3-ResNet101 backbone used as a dense feature extractor.
 
     Output: [B, 512, H/8, W/8] feature map for cross-attention conditioning.
+    Input images must be normalized to [0, 1].
     """
 
     def __init__(self, out_channels: int = 512):
@@ -110,8 +111,12 @@ def make_2d_sinusoidal_pos_enc(
     return torch.cat([enc_x, enc_y], dim=-1)  # [H*W, dim]
 
 
+
 class CrossAttentionBlock(nn.Module):
-    """Self-attention on segment tokens + cross-attention to image features."""
+    """Self-attention on segment tokens + cross-attention to image features.
+
+    Note: The pooling kernel size is hardcoded to 4, which is safe for default image sizes (e.g., 512x512 input → 64x64 features). If using non-standard image sizes, ensure compatibility.
+    """
 
     def __init__(self, vector_dim: int = 512, img_dim: int = 512):
         super().__init__()
@@ -159,13 +164,12 @@ class TransformerModel(nn.Module):
     Transformer denoiser for vector road-segment diffusion.
 
     Inputs:
-        x:             [B, N, 5]  noisy segments (x1, y1, x2, y2, layer)
+        x:             [B, N, 5]  noisy segments (x1, y1, x2, y2, active)
         t:             [B]        diffusion timestep
         image:         [B, 3, H, W] satellite image (values in [0, 1])
 
     Outputs:
-        eps_pred:      [B, N, 5]  predicted noise
-        mask_logits:   [B, N]     per-segment presence logit (1=road, 0=padding)
+        v_pred:        [B, N, 5]  predicted flow velocity (all 5 channels: x1, y1, x2, y2, active)
     """
 
     def __init__(self, max_segments: int = 500, img_feature_dim: int = 512):

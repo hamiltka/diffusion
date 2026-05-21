@@ -7,4 +7,7 @@ mode: gt_seeded       # anchor each spoke at its corresponding GT segment
 
 grid_size: 8          # cells per axis (used only in grid mode)
 n_spokes: 24          # directions per cell centre
-spoke_length: 0.12    # half-length of each spoke in [-1,1] space
+spoke_length: 0.06    # half-length of each spoke in [-1,1] space
+                      # = max_segment_length: spokes start at target scale, so velocity
+                      # only encodes position + direction corrections (no systematic shrink)
+                      # also eliminates p2 clamping at image boundary (0.875+0.06=0.935<1.0)

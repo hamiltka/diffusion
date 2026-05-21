@@ -117,13 +117,14 @@ class SpokeWheelAnchors:
 
         Returns the full [B, N_anchors, 5] spoke-wheel grid, just like generate(),
         except:
-          - Each valid GT segment is assigned to a **randomly chosen spoke within
-            the nearest grid cell** (random angle each call), then marked active=+1.
+          - Each valid GT segment is assigned to the spoke within the nearest grid
+            cell whose tip is closest (permutation-invariant) to the GT endpoints.
           - All other spokes remain at their grid positions with active = -1.
 
-        Using the nearest cell keeps the velocity magnitude bounded (spoke starts in
-        the right region), while randomising the angle within that cell prevents the
-        model from memorising a fixed GT-segment→spoke mapping.
+        Selecting the closest spoke tip aligns this assignment with the Hungarian
+        matching performed in build_targets, so the target active velocity is
+        approximately zero (no reclassification needed) and gradients flow cleanly
+        to the coordinate channels.
         """
         B, N_gt, _ = gt_segs.shape
         device = gt_segs.device
@@ -135,17 +136,37 @@ class SpokeWheelAnchors:
         # Midpoints of GT segments: [B, N_gt, 2]
         gt_mid = (gt_segs[..., :2] + gt_segs[..., 2:]) * 0.5
 
-        # Find the nearest cell for each GT segment, then pick a random spoke angle
-        # within that cell. This bounds the velocity scale while preventing the model
-        # from memorising a fixed GT→angle mapping.
         K = self.n_spokes
+        n_cells = self.grid_size ** 2
         cell_centres = torch.stack(
             [self._cell_cx.to(device), self._cell_cy.to(device)], dim=-1
         )  # [n_cells, 2]
+
+        # Find the nearest cell for each GT segment.
         cell_diff    = gt_mid.unsqueeze(2) - cell_centres[None, None]   # [B, N_gt, n_cells, 2]
         nearest_cell = cell_diff.pow(2).sum(-1).argmin(-1)              # [B, N_gt]
-        random_k     = torch.randint(0, K, nearest_cell.shape, device=device)  # [B, N_gt]
-        nearest      = nearest_cell * K + random_k                      # [B, N_gt]
+
+        # Compute spoke tip positions for every cell: [n_cells, K, 2]
+        angles = self._base_angles.to(device)                           # [K]
+        tip_x = (self._cell_cx.to(device)[:, None]
+                 + self.spoke_length * torch.cos(angles)[None, :])      # [n_cells, K]
+        tip_y = (self._cell_cy.to(device)[:, None]
+                 + self.spoke_length * torch.sin(angles)[None, :])
+        spoke_tips = torch.stack([tip_x, tip_y], dim=-1)                # [n_cells, K, 2]
+
+        # For each GT segment, select the spoke in its nearest cell whose tip
+        # is closest to either GT endpoint (permutation-invariant, same metric
+        # as build_targets).  Since all K spokes in a cell share the same p1
+        # (cell centre), only the tip distance differs across k.
+        #
+        # near_tips: [B, N_gt, K, 2]
+        near_tips = spoke_tips[nearest_cell]                            # [B, N_gt, K, 2]
+        gt_p1 = gt_segs[..., :2].unsqueeze(2)                          # [B, N_gt, 1, 2]
+        gt_p2 = gt_segs[..., 2:4].unsqueeze(2)
+        d_p1 = (near_tips - gt_p1).pow(2).sum(-1)                      # [B, N_gt, K]
+        d_p2 = (near_tips - gt_p2).pow(2).sum(-1)
+        best_k   = torch.minimum(d_p1, d_p2).argmin(-1)                # [B, N_gt]
+        nearest  = nearest_cell * K + best_k                           # [B, N_gt]
 
         # Mark matched spokes active=+1.
         for b in range(B):

@@ -70,3 +70,20 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Don't log errors without context or stack traces.
 - If something can fail, make sure it fails loudly and clearly.
 - Don't use getattr/setattr to silently ignore missing attributes. If an attribute is expected, access it directly to let it fail if it's not there.
+
+# 6. Research Findings Log
+**Any change to a hyperparameter, model architecture, data pipeline, or loss function
+must be recorded in `research_findings.md` at the workspace root.**
+
+Required fields for each entry:
+- **What changed**: the specific value, flag, or code path that was modified
+- **Why**: evidence (measured data, TensorBoard scalars, geometric reasoning) — not just intuition
+- **Files touched**: exact file paths
+- **Expected effect**: what metric or behaviour should improve and why
+
+Rules:
+- Append under a heading that includes the **date and time** (e.g. `## 2026-05-21 14:32 — Session N: Short Description`); do not edit past entries
+- Include measured numbers where available (e.g. "p99=710, was using max=1500")
+- If a change is reverted, add a new entry explaining why rather than deleting the original
+- Config-only changes (learning rate, batch size, weight decay) still qualify if they
+  are based on data rather than arbitrary guessing

@@ -4,9 +4,9 @@
 data_root: "${oc.env:DATA_ROOT,/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP}"
 image_size: 512
 gsd_m: 1.0
-max_gt_segments: 1500
+max_gt_segments: 800   # post-densification val p99=710, max=1928; 800 covers 99%+ without huge tensors
 max_segment_length: 0.06
-densify: false
+densify: true          # split long segments ≤ 0.06; was false (large velocity magnitudes)
 
 min_valid_features_train: 0
 min_valid_features_val: 0
@@ -17,9 +17,7 @@ nodata_threshold: 0.30
 nodata_white_threshold: 250
 nodata_black_threshold: 5
 use_exclusion_csv: true
-exclusion_csv_path: "${oc.env:EXCLUSION_CSV_PATH,/home/hamiltka/trace-segmentation-train/maptrace/excluded_crops.csv}"
-use_source_blocklist: false
-blocklist_path: "${oc.env:BLOCKLIST_PATH,/home/hamiltka/trace-segmentation-train/maptrace/datasets/blocklists/outlier_sources_epoch10.csv}"
+exclusion_csv_path: "${paths.exclusion_csv}"
 
 max_train_samples: 500
 max_val_samples: 200
