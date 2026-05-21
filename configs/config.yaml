@@ -1,0 +1,30 @@
+# GEODiffusion top-level Hydra config for flow matching
+# Launch with: python train.py [+experiment=flow_transformer] [overrides...]
+
+defaults:
+  - _self_
+  - paths@paths: paths
+  - paths@checkpoint: checkpoints
+  - lightning@lightning: lightning
+  - lightning@lightning.callbacks: callbacks
+  - lightning@lightning.logger: logger
+  - data: usgs_crops_512_trace_2
+  - training: default
+  - anchors: spoke_wheel
+  - loss: default
+  - model: transformer
+
+# Experiment identification
+name: "flow_matching"
+experiment_run_id: "${name}"
+
+# Validation image grid logging frequency (epochs)
+val_image_log_every_n_epochs: 1
+
+# Hydra output directory
+hydra:
+  run:
+    dir: runs/hydra/${experiment_run_id}
+  sweep:
+    dir: runs/multirun/${experiment_run_id}
+    subdir: ${hydra.job.num}

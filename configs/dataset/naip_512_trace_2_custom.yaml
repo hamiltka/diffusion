@@ -1,0 +1,15 @@
+# @package dataset
+# NAIP dataset — custom subset for 500-epoch production run
+# 2000 train samples, 250 val samples
+
+name: "naip-crops-512-trace-2.0-custom"
+image_size: 512
+channels: 3
+normalize: false
+mean: null
+std: null
+train_subset_size: 2000
+val_subset_size: 250
+data_root: "/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP"
+use_augmentation: false
+valid: true

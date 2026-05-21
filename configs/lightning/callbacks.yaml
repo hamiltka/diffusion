@@ -1,0 +1,10 @@
+# @package lightning.callbacks
+checkpoint_monitor: "Loss/val"
+checkpoint_mode: "min"
+checkpoint_save_top_k: 1
+checkpoint_save_last: true
+checkpoint_every_n_epochs: 1
+early_stop_monitor: "Loss/val"
+early_stop_patience: 100
+early_stop_min_delta: 0.0001
+early_stop_mode: "min"

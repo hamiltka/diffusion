@@ -1,0 +1,27 @@
+# @package data
+# Demo run: 500 train, 200 val
+
+data_root: "${oc.env:DATA_ROOT,/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP}"
+image_size: 512
+gsd_m: 1.0
+max_gt_segments: 1500
+max_segment_length: 0.06
+densify: false
+
+min_valid_features_train: 0
+min_valid_features_val: 0
+max_valid_features_train: 0
+max_valid_features_val: 0
+filter_nodata: false
+nodata_threshold: 0.30
+nodata_white_threshold: 250
+nodata_black_threshold: 5
+use_exclusion_csv: true
+exclusion_csv_path: "${oc.env:EXCLUSION_CSV_PATH,/home/hamiltka/trace-segmentation-train/maptrace/excluded_crops.csv}"
+use_source_blocklist: false
+blocklist_path: "${oc.env:BLOCKLIST_PATH,/home/hamiltka/trace-segmentation-train/maptrace/datasets/blocklists/outlier_sources_epoch10.csv}"
+
+max_train_samples: 500
+max_val_samples: 200
+
+augment: false  # demo run — no augmentation

@@ -1,0 +1,3 @@
+# @package lightning.logger
+tensorboard_log_dir: "${paths.logs_folder}"
+csv_log_dir: "${paths.logs_folder}"

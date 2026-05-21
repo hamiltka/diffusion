@@ -1,0 +1,20 @@
+# @package _global_
+# Flow-matching transformer experiment
+# Usage: python train.py +experiment=flow_transformer
+
+defaults:
+  - override /data: usgs_crops_512_trace_2
+  - override /training: default
+  - override /anchors: spoke_wheel
+  - override /loss: default
+
+training:
+  lr: 1e-4
+  batch_size: 4
+  num_epochs: 500
+  num_workers: 8
+
+anchors:
+  grid_size: 8
+  n_spokes: 24
+  spoke_length: 0.12

@@ -1,0 +1,35 @@
+# @package trainer
+
+# Diffusion process
+timesteps: 200
+schedule_type: cosine        # cosine | linear | sqrt | sigmoid
+eval_timesteps: [0, 25, 50, 100, 150, 199]
+
+# Optimisation
+lr: 1.0e-4
+weight_decay: 1.0e-5
+num_epochs: 200
+batch_size: 4
+num_workers: 4
+gradient_clipping: 1.0
+
+# Loss weights
+lambda_mask: 1.0
+lambda_endpoint: 0.0
+
+# Endpoint snapping during training
+snap_endpoints: true
+snap_threshold: 0.02
+snap_mode: self
+
+# Collinear segment merging (postprocess after snap)
+collinear_merge: true
+collinear_merge_threshold: 0.02   # endpoint distance for merge candidate
+collinear_merge_angle_tol: 15.0   # degrees off 180° still considered straight
+
+# LR scheduler (optional)
+lr_scheduler:
+  type: cosine
+  params:
+    T_max: 200
+    eta_min: 1.0e-7

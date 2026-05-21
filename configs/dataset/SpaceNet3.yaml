@@ -1,0 +1,8 @@
+# @package dataset
+name: "SpaceNet3" 
+image_size: 512
+train_subset_size: null
+normalize: false
+val_subset_size: null
+# Full path to this specific dataset
+data_root: "/shared/femiani_shared/data/SpaceNet3"

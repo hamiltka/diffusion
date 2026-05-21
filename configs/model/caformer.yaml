@@ -1,0 +1,17 @@
+# @package model
+# CAFormer-S18 + FPN decoder for road segmentation.
+# Configured for 4-channel RGB+NIR input with road / crossing_flag / endpoint_flag outputs.
+architecture: caformer
+num_outputs: 3
+in_channels: 4
+outputs:
+  roads: 0
+  crossing_flag: 1
+  endpoint_flag: 2
+backbone_name: caformer_s18
+fpn_channels: 256
+pretrained: true
+use_crossing_flag_head: true
+use_endpoint_flag_head: true
+use_centerline_head: false
+use_intersection_head: false

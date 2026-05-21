@@ -1,0 +1,10 @@
+# @package trainer.loss_weights
+roads: 1.0
+dist: 0.0
+roads_dice: 0.0
+roads_patch: 0.0
+road_type_id: 0.0
+major_road_type_id: 0.0
+crossing_flag: 0.0
+endpoint_flag: 0.0
+vertex_id: 0.0

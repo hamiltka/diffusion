@@ -1,0 +1,5 @@
+# @package trainer.lr_scheduler
+type: "cosine"
+params:
+  T_max: 500
+  eta_min: 0.0000001

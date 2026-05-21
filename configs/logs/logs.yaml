@@ -1,0 +1,10 @@
+# @package trainer.monitoring
+log_gpu_metrics: false
+log_gradient_stats: false
+log_training_monitor: false
+log_progressive_viz: true
+log_per_step: false
+log_per_layer_gradients: false
+log_model_stats: false
+viz_num_samples: 20
+viz_log_every_n_epochs: 1

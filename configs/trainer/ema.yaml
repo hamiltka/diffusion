@@ -1,0 +1,8 @@
+# @package trainer.ema
+use_ema: false
+ema_decay: 0.999
+ema_eval_freq: 1
+ema_start: 0
+num_outliers_percentile: 95
+outlier_weight: 0.1
+gamma: 0.95

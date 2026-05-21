@@ -1,0 +1,32 @@
+# @package loss
+# Loss function weights for flow matching
+
+segment_weight:      2.0    # (A) permutation-invariant endpoint MSE (raised 1.0 → 2.0 — geometry not snapping to road)
+active_weight:       1.0    # (B) active-channel regression
+connectivity_weight: 0.5    # (C) shared-node convergence penalty (raised 0.1 → 0.5 — segments not connecting)
+endpoint_cluster_weight: 0.05  # (D) penalise nearby endpoints from different segments (raised 0.01 → 0.05 to give it real influence)
+
+# (E) GT Endpoint Attraction Loss: pulls each active predicted endpoint toward
+# the nearest valid GT endpoint within attraction_radius. Teaches the model to
+# land endpoints at junctions/termini rather than floating mid-road.
+gt_endpoint_attraction_weight: 0.1    # raised 0.03 → 0.1 — pull endpoints toward junctions more aggressively
+gt_endpoint_attraction_radius: 0.05   # normalised coords (~25px at 512 resolution)
+
+# (F) Collinear fragmentation loss: penalises near-collinear segment pairs with a shared close endpoint.
+# Teaches the model to emit fewer, longer segments rather than collinear fragments.
+collinear_fragmentation_weight: 0.02
+collinear_gap_threshold: 0.03
+collinear_angle_tol_deg: 20.0
+collinear_tau_perp: 0.02        # max perpendicular distance for same-line check
+
+node_eps: 0.03   # distance threshold for declaring two GT endpoints as shared (increased from 0.02 for stricter junction grouping)
+
+# Endpoint clustering loss: discourages fragmented predictions
+endpoint_cluster_radius: 0.03  # distance threshold for "nearby" endpoints in normalised coords
+endpoint_cluster_active_threshold: 0.0  # only consider endpoints with active_score > this
+
+# Class-imbalance correction for active channel (~93% inactive vs ~7% active).
+# Correct formula: (1 - match_fraction) / match_fraction.
+# At 7% match rate: 0.93/0.07 ≈ 13.  Previous value of 5.0 was insufficient —
+# all trained checkpoints collapsed to all-inactive.
+active_pos_weight: 13.0

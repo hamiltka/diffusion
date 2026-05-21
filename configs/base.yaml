@@ -1,0 +1,24 @@
+defaults:
+  - _self_
+  - paths@paths: paths
+  - paths@checkpoint: checkpoints
+  - trainer@trainer: trainer
+  - lightning@lightning: lightning
+  - lightning@lightning.callbacks: callbacks
+  - lightning@lightning.logger: logger
+  - experiment: transformer
+
+# Experiment identification
+name: "UNNAMED"
+experiment_run_id: "${name}"
+
+# Validation image grid logging frequency (epochs)
+val_image_log_every_n_epochs: 1
+
+# Hydra output directory
+hydra:
+  run:
+    dir: runs/hydra/${experiment_run_id}
+  sweep:
+    dir: runs/multirun/${experiment_run_id}
+    subdir: ${hydra.job.num}

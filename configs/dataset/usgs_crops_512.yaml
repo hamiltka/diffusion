@@ -1,0 +1,9 @@
+# @package dataset
+name: "usgs-osm-crops-512-roads-aug-1m" 
+image_size: 512
+train_subset_size: null
+normalize: false
+val_subset_size: null
+# Full path to this specific dataset
+# Example: "/shared/femiani_shared/data/Global-Scale"
+data_root: "/shared/femiani_shared/usgs-osm-crops-512-1m-all"

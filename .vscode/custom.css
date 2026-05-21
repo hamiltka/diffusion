@@ -1,0 +1,8 @@
+/* Explorer: folder names = hot pink + bold, file names = purple */
+.explorer-viewlet .monaco-list-row:has(.monaco-tl-twistie.collapsible) .label-name {
+  color: #ff69b4 !important;
+  font-weight: 600 !important;
+}
+.explorer-viewlet .monaco-list-row:not(:has(.monaco-tl-twistie.collapsible)) .label-name {
+  color: #b47fff !important;
+}

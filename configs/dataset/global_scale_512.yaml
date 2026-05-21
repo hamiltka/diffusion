@@ -1,0 +1,12 @@
+# @package dataset
+name: "global-scale-512"
+image_size: 512
+channels: 3
+normalize: false
+mean: null
+std: null
+train_subset_size: null
+val_subset_size: null
+data_root: "/shared/femiani_shared/data/Global-Scale"
+use_augmentation: false
+valid: false

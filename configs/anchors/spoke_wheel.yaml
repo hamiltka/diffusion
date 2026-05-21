@@ -1,0 +1,10 @@
+# @package anchors
+# Spoke-wheel source distribution for flow matching
+# N_anchors = grid_size² × n_spokes = 8×8×24 = 1536
+
+type: spoke_wheel
+mode: gt_seeded       # anchor each spoke at its corresponding GT segment
+
+grid_size: 8          # cells per axis (used only in grid mode)
+n_spokes: 24          # directions per cell centre
+spoke_length: 0.12    # half-length of each spoke in [-1,1] space

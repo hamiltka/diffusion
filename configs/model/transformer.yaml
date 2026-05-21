@@ -1,0 +1,5 @@
+# @package model
+name: transformer
+img_feature_dim: 512
+# max_segments is derived from anchors at runtime:
+#   grid_size² × n_spokes  (e.g. 8×8×24 = 1536)

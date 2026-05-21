@@ -1,0 +1,14 @@
+# @package trainer.patch_loss
+patch_size: 3
+patch_reciprocal: false
+recip_max_dist: 5
+recip_temp: 0.1
+recip_alpha: 5.0
+recip_normalization: "max"
+recip_singleton_penalty: 0.5
+# Intersection loss
+intersection_loss_weight: 0.0
+# Focal loss
+patch_use_focal_loss: false
+patch_focal_alpha: 0.25
+patch_focal_gamma: 2.0

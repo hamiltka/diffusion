@@ -1,0 +1,9 @@
+# @package model
+architecture: segformer
+num_outputs: 1
+in_channels: 3
+outputs:
+  roads: 0
+variant: nvidia/segformer-b0-finetuned-ade-512-512
+pretrained: true
+learned_upsample: false

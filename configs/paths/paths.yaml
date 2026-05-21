@@ -1,0 +1,6 @@
+# @package paths
+data_root: "${oc.env:DATA_ROOT,/data2}"
+checkpoints_folder: "${oc.env:CHECKPOINTS_FOLDER,runs/checkpoints}"
+logs_folder: "${oc.env:LOGS_FOLDER,runs/logs}"
+weights_folder: "${oc.env:WEIGHTS_FOLDER,runs/weights}"
+hydra_outputs: "${oc.env:HYDRA_OUTPUTS,runs/hydra}"

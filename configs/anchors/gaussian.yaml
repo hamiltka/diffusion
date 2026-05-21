@@ -1,0 +1,6 @@
+# @package anchors
+# Gaussian fallback source distribution (no structure)
+# N_anchors must be specified explicitly here
+
+type: gaussian
+n_anchors: 1536   # must match model capacity

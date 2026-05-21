@@ -1,0 +1,33 @@
+# @package _global_
+# Overfit sanity check using the new gt_seeded spoke-wheel anchor mode.
+# The source distribution x0 is the full spoke grid with GT-matched spokes
+# flagged active=+1 up front, giving the model a structured prior.
+#
+# Run: conda activate trace_geo && python train.py +experiment=overfit_gt_seeded
+
+defaults:
+  - override /data: usgs_crops_512_trace_2_demo1k
+  - override /training: default
+  - override /anchors: spoke_wheel
+  - override /loss: default
+
+name: "overfit_gt_seeded"
+experiment_run_id: "overfit_gt_seeded"
+
+anchors:
+  mode: gt_seeded
+
+training:
+  lr: 1e-4
+  batch_size: 4
+  num_epochs: 600
+  num_workers: 2
+  n_metric_samples: 32
+  euler_steps_eval: 10
+
+data:
+  max_train_samples: 32
+  max_val_samples: 32
+  augment: false
+
+val_image_log_every_n_epochs: 1

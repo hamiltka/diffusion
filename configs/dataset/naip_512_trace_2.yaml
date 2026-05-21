@@ -1,0 +1,15 @@
+# @package dataset
+# NAIP dataset — same tile structure as usgs-osm-crops-512-1m-trace-2.0 but
+# served from /data (NAIP server); includes NIR as band 4.
+# Use channels: 4 when the model accepts RGBNIR input.
+name: "naip-crops-512-trace-2.0"
+image_size: 512
+channels: 3          # set to 4 to load RGBNIR
+normalize: false
+mean: null
+std: null
+train_subset_size: null
+val_subset_size: null
+data_root: "/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP"
+use_augmentation: false
+valid: true

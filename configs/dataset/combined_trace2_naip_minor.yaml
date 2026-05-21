@@ -1,0 +1,21 @@
+# @package dataset
+# Combined dataset: NAIP (primary) + minor-classes crops.
+# Both datasets contribute to both train and val splits.
+# data_module.py uses extra_data_splits=[train] for training and overrides to
+# [val] automatically when building the validation set.
+name: "combined-naip-minor"
+image_size: 512
+channels: 3
+normalize: false
+mean: null
+std: null
+train_subset_size: null
+val_subset_size: null
+data_root: "/shared/femiani_shared/data/usgs_crops_512_trace_2_NAIP"
+extra_data_roots:
+  - "/shared/femiani_shared/data/minor_classes_crops"
+# data_module overrides this to ['val'] when building the val set
+extra_data_splits:
+  - train
+use_augmentation: false
+valid: true
