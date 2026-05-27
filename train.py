@@ -228,12 +228,8 @@ def train(cfg: DictConfig) -> None:
     is_rank0 = os.environ.get("LOCAL_RANK", "0") == "0"
 
     if is_rank0:
-        # Total anchor count depends on mode: gt_seeded uses max_gt_segments, grid uses grid²×spokes.
-        anchor_mode = str(cfg.anchors.get("mode", "grid"))
-        if anchor_mode == "gt_seeded":
-            n_anchors = cfg.data.max_gt_segments
-        else:
-            n_anchors = cfg.anchors.grid_size ** 2 * cfg.anchors.n_spokes
+        # SpokeWheelAnchors always emits grid_size^2 * n_spokes anchors in both modes.
+        n_anchors = cfg.anchors.grid_size ** 2 * cfg.anchors.n_spokes
 
         # Build a compact run summary panel so each launch shows the effective config at a glance.
         t = Table.grid(padding=(0, 3))

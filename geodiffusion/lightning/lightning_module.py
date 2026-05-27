@@ -53,6 +53,8 @@ Images — every val_image_log_every_n_epochs epochs:
 """
 from __future__ import annotations
 
+import csv
+import os
 import random
 import numpy as np
 import matplotlib
@@ -115,33 +117,13 @@ class VectorFlowLightningModule(pl.LightningModule):
         self.dist_loss_fn = DistanceLoss()
         self.act_loss_fn  = ActiveLoss(pos_weight=float(lc.get("active_pos_weight", 6.0)))
         self.conn_loss_fn = ConnectivityLoss(node_eps=float(lc.get("node_eps", 0.02)))
-        from geodiffusion.losses.losses import EndpointClusteringLoss, GTEndpointAttractionLoss, CollinearFragmentationLoss
-        self.ep_cluster_loss_fn = EndpointClusteringLoss(
-            cluster_radius=float(lc.get("endpoint_cluster_radius", 0.03)),
-            active_threshold=float(lc.get("endpoint_cluster_active_threshold", 0.0)),
-            gt_exclusion_radius=float(lc.get("gt_endpoint_attraction_radius", 0.05)),
-        )
-        self.gt_ep_attr_loss_fn = GTEndpointAttractionLoss(
-            attraction_radius=float(lc.get("gt_endpoint_attraction_radius", 0.05)),
-            active_threshold=float(lc.get("endpoint_cluster_active_threshold", 0.0)),
-        )
-        self.collinear_frag_loss_fn = CollinearFragmentationLoss(
-            gap_threshold=float(lc.get("collinear_gap_threshold", 0.03)),
-            angle_tol_deg=float(lc.get("collinear_angle_tol_deg", 20.0)),
-            tau_perp=float(lc.get("collinear_tau_perp", 0.02)),
-            active_threshold=float(lc.get("endpoint_cluster_active_threshold", 0.0)),
-        )
-
         self.w_seg  = float(lc.get("segment_weight",      1.0))
         self.w_act  = float(lc.get("active_weight",       0.5))
         self.w_conn = float(lc.get("connectivity_weight", 0.1))
-        self.w_ep_cluster        = float(lc.get("endpoint_cluster_weight", 0.01))
-        self.w_gt_ep_attr         = float(lc.get("gt_endpoint_attraction_weight", 0.0))
-        self.w_collinear_frag    = float(lc.get("collinear_fragmentation_weight", 0.0))
 
         # ── eval / visualisation config ───────────────────────────────────────
         self.val_image_log_every_n_epochs: int = int(
-            cfg.get("val_image_log_every_n_epochs", 10)
+            cfg.get("val_image_log_every_n_epochs", 2)
         )
         self.n_metric_samples: int  = int(tc.get("n_metric_samples",  64))
         self.euler_steps_eval: int  = int(tc.get("euler_steps_eval",  10))
@@ -151,6 +133,9 @@ class VectorFlowLightningModule(pl.LightningModule):
         self._train_loss_hist: list[tuple[int, float]] = []
         self._val_loss_hist:   list[tuple[int, float]] = []
         self._step_train_losses: list[float] = []  # accumulate within each epoch
+        # ── per-step active diagnostics (written to CSV at epoch end) ─────────
+        self._step_active_pred_means: list[float] = []
+        self._step_gt_active_fracs:   list[float] = []
 
         # ── locked grid-sample indices (set once, then fixed for all epochs) ─
         # Each dict: {"sparse": [i, j], "medium": [i, j], "dense": [i, j]}
@@ -173,9 +158,10 @@ class VectorFlowLightningModule(pl.LightningModule):
     # ──────────────────────────────────────────────────────────────────────────
 
     def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor | None:
+        import os
+        import math
+        # ...existing code...
         if batch is None or batch.get("_skip_batch", False):
-            # Must still participate in every sync_dist collective so that DDP
-            # all-reduces are symmetric across ranks; log zeros and skip grad.
             z = torch.zeros(1, device=self.device).squeeze()
             self.log("Train/seg_loss",       z, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
             self.log("Train/active_loss",    z, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
@@ -185,56 +171,52 @@ class VectorFlowLightningModule(pl.LightningModule):
             self.log("Train/active_accuracy",z, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
             return None
 
-        try:
-            images  = batch["image"].float() / 255.0   # [B, 3, H, W]
-            gt_segs = batch["road_data"]               # [B, max_gt, 4]
-            invalid = batch["invalid_mask"]            # [B, max_gt]
-            B = images.shape[0]
+        images  = batch["image"].float() / 255.0   # [B, 3, H, W]
+        gt_segs = batch["road_data"]               # [B, max_gt, 4]
+        invalid = batch["invalid_mask"]            # [B, max_gt]
+        B = images.shape[0]
+        if self.cfg.anchors.get("mode", "grid") == "gt_seeded":
+            x0 = self.anchors.generate_from_gt(gt_segs, invalid)    # [B, N, 5]
+        else:
+            x0 = self.anchors.generate(B, self.device)              # [B, N, 5]
+        targets, matched_indices, junction_pairs = build_targets(
+            x0, gt_segs, invalid, node_eps=self.conn_loss_fn.node_eps
+        )  # [B,N,5], [M_total,2], [P_total,5]
 
-            if self.cfg.anchors.get("mode", "grid") == "gt_seeded":
-                x0 = self.anchors.generate_from_gt(gt_segs, invalid)    # [B, N, 5]
-            else:
-                x0 = self.anchors.generate(B, self.device)              # [B, N, 5]
-            targets, matched_indices, junction_pairs = build_targets(
-                x0, gt_segs, invalid, node_eps=self.conn_loss_fn.node_eps
-            )  # [B,N,5], [M_total,2], [P_total,5]
+        t = torch.rand(B, device=self.device)
+        xt      = self.flow.interpolate(x0, targets, t)         # [B, N, 5]
+        v_gt    = self.flow.velocity(x0, targets)               # [B, N, 5]
+        v_pred  = self.model(xt, t, image=images)               # [B, N, 5]
 
-            t = torch.rand(B, device=self.device)
-            xt      = self.flow.interpolate(x0, targets, t)         # [B, N, 5]
-            v_gt    = self.flow.velocity(x0, targets)               # [B, N, 5]
-            v_pred  = self.model(xt, t, image=images)               # [B, N, 5]
+        dist_loss = self.dist_loss_fn(v_pred[:, :, :4], v_gt[:, :, :4], matched_indices)
+        act_loss  = self.act_loss_fn(v_pred[:, :, 4],  v_gt[:, :, 4])
+        x1pred    = x0 + v_pred  # [B, N, 5]
+        conn_loss = self.conn_loss_fn(x1pred, junction_pairs)
+        total     = (self.w_seg * dist_loss + self.w_act * act_loss
+                        + self.w_conn * conn_loss)
 
-            dist_loss = self.dist_loss_fn(v_pred[:, :, :4], v_gt[:, :, :4], matched_indices)
-            act_loss  = self.act_loss_fn(v_pred[:, :, 4],  v_gt[:, :, 4])
-            x1pred    = x0 + v_pred  # [B, N, 5]
-            conn_loss = self.conn_loss_fn(x1pred, junction_pairs)
-            # Compute final positions for endpoint clustering loss
-            ep_cluster_loss     = self.ep_cluster_loss_fn(x1pred, gt_segs, invalid)
-            gt_ep_attr_loss     = self.gt_ep_attr_loss_fn(x1pred, gt_segs, invalid)
-            collinear_frag_loss = self.collinear_frag_loss_fn(x1pred)
-            total     = (self.w_seg * dist_loss + self.w_act * act_loss
-                         + self.w_conn * conn_loss + self.w_ep_cluster * ep_cluster_loss
-                         + self.w_gt_ep_attr * gt_ep_attr_loss
-                         + self.w_collinear_frag * collinear_frag_loss)
+        match_frac = matched_indices.shape[0] / (B * v_pred.shape[1])
+        active_acc = ((v_gt[:, :, 4] > 0) == (v_pred[:, :, 4] > 0)).float().mean()
+        pred_active_mean = float(v_pred[:, :, 4].detach().mean().item())
+        gt_active_frac   = float((v_gt[:, :, 4] > 0).float().mean().item())
 
-            match_frac = matched_indices.shape[0] / (B * v_pred.shape[1])
-            active_acc = ((v_gt[:, :, 4] > 0) == (v_pred[:, :, 4] > 0)).float().mean()
-        except Exception as e:
-            print(f"[training_step] batch_idx={batch_idx} failed: {e}", flush=True)
-            raise
+        # ...existing code...
 
         # per-component losses
-        self.log("Train/seg_loss",    dist_loss, on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/active_loss", act_loss,  on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/conn_loss",   conn_loss, on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/ep_cluster_loss",     ep_cluster_loss,     on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/gt_ep_attr_loss",      gt_ep_attr_loss,     on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/collinear_frag_loss",  collinear_frag_loss, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Loss/train",        total,     on_step=True,  on_epoch=True,  prog_bar=True,  sync_dist=True)
+        self.log("Train/seg_loss",         dist_loss,         on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Train/active_loss",      act_loss,          on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Train/conn_loss",        conn_loss,         on_step=True,  on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Loss/train",             total,             on_step=True,  on_epoch=True,  prog_bar=True,  sync_dist=True)
 
         # matching diagnostics
-        self.log("Train/match_fraction",  match_frac, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
-        self.log("Train/active_accuracy", active_acc, on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Train/match_fraction",   match_frac,        on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Train/active_accuracy",  active_acc,        on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+        self.log("Train/pred_active_mean", pred_active_mean,  on_step=True, on_epoch=False, prog_bar=False, sync_dist=False)
+        self.log("Train/gt_active_frac",   gt_active_frac,    on_step=True, on_epoch=False, prog_bar=False, sync_dist=False)
+
+        # accumulate for CSV diagnostics
+        self._step_active_pred_means.append(pred_active_mean)
+        self._step_gt_active_fracs.append(gt_active_frac)
 
         if isinstance(total, torch.Tensor) and total.numel() > 0:
             self._step_train_losses.append(float(total.detach().item()))
@@ -243,16 +225,49 @@ class VectorFlowLightningModule(pl.LightningModule):
 
     def on_train_epoch_start(self) -> None:
         opt = self.optimizers()
-        if opt is not None:
-            lr = opt.param_groups[0]["lr"]
-            self.log("Train/lr", lr, on_step=False, on_epoch=True, prog_bar=False, sync_dist=False)
+        lr = opt.param_groups[0]["lr"]
+        self.log("Train/lr", lr, on_step=False, on_epoch=True, prog_bar=False, sync_dist=False)
 
     def on_train_epoch_end(self) -> None:
         """Average step losses into an epoch loss and store for loss-curve figure."""
-        if self._step_train_losses and self.trainer.is_global_zero:
-            avg = float(np.mean(self._step_train_losses))
-            self._train_loss_hist.append((self.current_epoch, avg))
+        if self.trainer.is_global_zero:
+            ep = self.current_epoch
+            avg_loss          = float(np.mean(self._step_train_losses))         if self._step_train_losses         else float("nan")
+            avg_active_pred   = float(np.mean(self._step_active_pred_means))    if self._step_active_pred_means    else float("nan")
+            avg_gt_active_frac= float(np.mean(self._step_gt_active_fracs))      if self._step_gt_active_fracs      else float("nan")
+
+            if self._step_train_losses:
+                self._train_loss_hist.append((ep, avg_loss))
+
+            # ── human-readable stdout summary ─────────────────────────────────
+            print(
+                f"[Epoch {ep:04d}]  loss={avg_loss:.4f}  "
+                f"pred_active_mean={avg_active_pred:.4f}  "
+                f"gt_active_frac={avg_gt_active_frac:.4f}",
+                flush=True,
+            )
+
+            # ── per-epoch diagnostics CSV ──────────────────────────────────────
+            log_dir  = self.cfg.paths.logs_folder
+            run_name = self.cfg.get("name", "run")
+            csv_path = os.path.join(log_dir, run_name, "diagnostics.csv")
+            os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+            write_header = not os.path.exists(csv_path)
+            row = {
+                "epoch":            ep,
+                "avg_loss":         avg_loss,
+                "pred_active_mean": avg_active_pred,
+                "gt_active_frac":   avg_gt_active_frac,
+            }
+            with open(csv_path, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row)
+
         self._step_train_losses.clear()
+        self._step_active_pred_means.clear()
+        self._step_gt_active_fracs.clear()
 
     # ──────────────────────────────────────────────────────────────────────────
     # Validation step  (teacher-forced, all batches — for checkpoint monitoring)
@@ -299,7 +314,7 @@ class VectorFlowLightningModule(pl.LightningModule):
             match_frac = matched_indices.shape[0] / (B * v_pred.shape[1])
             active_acc = ((v_gt[:, :, 4] > 0) == (v_pred[:, :, 4] > 0)).float().mean()
         except Exception as e:
-            print(f"[validation_step] batch_idx={batch_idx} failed: {e}", flush=True)
+            # print(f"[validation_step] batch_idx={batch_idx} failed: {e}", flush=True)
             seg_loss = act_loss = conn_loss = total = match_frac = active_acc = z
 
         self.log("Val/seg_loss",    dist_loss,  on_step=False, on_epoch=True, prog_bar=False, sync_dist=True)
@@ -309,34 +324,28 @@ class VectorFlowLightningModule(pl.LightningModule):
         self.log("Val/match_fraction",  match_frac, on_step=False, on_epoch=True, sync_dist=True)
         self.log("Val/active_accuracy", active_acc, on_step=False, on_epoch=True, sync_dist=True)
 
-    def on_validation_epoch_end(self) -> None:
-        # Capture val loss for the loss-curve figure (rank-0 only)
-        if self.trainer.is_global_zero:
-            val = self.trainer.callback_metrics.get("Loss/val", None)
-            if val is not None:
-                self._val_loss_hist.append((self.current_epoch, float(val)))
+    def on_fit_start(self) -> None:
+        """Populate locked eval indices once from the val dataset."""
+        dm = self.trainer.datamodule
+        if dm is None:
+            return
+        ds = getattr(dm, "val_dataset", None)
+        if ds is None:
+            return
+        n_eval = int(self.cfg.training.get("n_eval_samples", 20))
+        n_eval = min(n_eval, len(ds))
+        self._eval_indices = list(range(n_eval))
+        self._viz_indices  = list(range(min(4, n_eval)))
+        # print(f"[on_fit_start] eval_indices set: {n_eval} samples", flush=True)
 
-        should_eval = (
-            not self.trainer.sanity_checking
-            and (self.current_epoch + 1) % self.val_image_log_every_n_epochs == 0
-            and self.logger is not None
-            and self.trainer.is_global_zero
-        )
-        if should_eval:
+    def on_validation_epoch_end(self) -> None:
+        # Always log images every validation epoch
+        if hasattr(self, '_run_comprehensive_eval'):
             try:
                 self._run_comprehensive_eval()
             except Exception as e:
-                import traceback
-                print(f"[VectorFlowLightningModule] comprehensive eval failed: {e}")
-                traceback.print_exc()
-
-        # Barrier: keep all DDP ranks in lockstep.  Rank 0 may spend several
-        # minutes inside _run_comprehensive_eval while rank 1 is idle.  Without
-        # this barrier rank 1 advances to the next training epoch and blocks on
-        # the first all_reduce, which rank 0 never joins → NCCL watchdog fires.
-        import torch.distributed as dist
-        if dist.is_available() and dist.is_initialized():
-            dist.barrier()
+                # print(f"[on_validation_epoch_end] Image logging failed: {e}", flush=True)
+                pass
 
     # ──────────────────────────────────────────────────────────────────────────
     # Optimiser
@@ -349,56 +358,26 @@ class VectorFlowLightningModule(pl.LightningModule):
             lr=float(tc.lr),
             weight_decay=float(tc.get("weight_decay", 1e-5)),
         )
-        sched_cfg = tc.get("lr_scheduler", None)
-        if sched_cfg is None or sched_cfg.get("type", "none") == "none":
-            return optimizer
-
-        stype  = sched_cfg.type
-        params = OmegaConf.to_container(sched_cfg.get("params", {}), resolve=True)
-        if stype == "cosine":
-            params.setdefault("T_max", int(tc.num_epochs))
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, **params)
-        elif stype == "step":
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, **params)
-        else:
-            raise ValueError(f"Unknown lr_scheduler type: {stype!r}")
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
-        }
+        return optimizer
 
     # ──────────────────────────────────────────────────────────────────────────
     # Comprehensive evaluation  (Euler-integrated, runs every N epochs)
     # ──────────────────────────────────────────────────────────────────────────
 
     @torch.no_grad()
-    @torch.no_grad()
     def _run_comprehensive_eval(self) -> None:
-        """
-        Full inference pass on a val subset.  Computes publication metrics and
-        logs three visualisation grids to TensorBoard.
-        """
-        dm = self.trainer.datamodule
-        if dm is None or dm.val_dataset is None:
+        # Ensure datamodule is available
+        if not hasattr(self, 'trainer') or not hasattr(self.trainer, 'datamodule') or self.trainer.datamodule is None:
+            print("[on_validation_epoch_end] Image logging failed: datamodule is not available", flush=True)
             return
-
-        dataset    = dm.val_dataset
-        n_samples  = min(self.n_metric_samples, len(dataset))
-        euler_steps = self.euler_steps_eval
-
-        # Randomly select indices once, then lock them for consistent tracking
-        if self._eval_indices is None:
-            all_idx = list(range(len(dataset)))
-            random.shuffle(all_idx)
-            self._eval_indices = all_idx[:n_samples]
-            # Pick 8 spread across the selected set for the viz grid
-            viz_pool = list(range(n_samples))
-            random.shuffle(viz_pool)
-            self._viz_indices = viz_pool[:8]
-
-        eval_indices = self._eval_indices
-        viz_set      = set(self._viz_indices)   # positions within eval_indices
-
+        dm = self.trainer.datamodule
+        dataset = getattr(dm, "val_dataset", None)
+        if dataset is None:
+            print("[_run_comprehensive_eval] val_dataset not available, skipping.", flush=True)
+            return
+        eval_indices = self._eval_indices if self._eval_indices is not None else []
+        n_samples = len(eval_indices)
+        viz_set = set(range(min(4, n_samples)))
         self.model.eval()
 
         pred_list_raw:  list[torch.Tensor] = []  # [M_i, 4] active preds per image
@@ -431,7 +410,7 @@ class VectorFlowLightningModule(pl.LightningModule):
             else:
                 x0 = self.anchors.generate(B, self.device)
             x1pred_raw = self.flow.euler_integrate(
-                x0, self.model, imgs, steps=euler_steps, device=self.device
+                x0, self.model, imgs, steps=self.euler_steps_eval, device=self.device
             )
             x1pred = x1pred_raw.clone()
 
@@ -527,26 +506,7 @@ class VectorFlowLightningModule(pl.LightningModule):
         tb.add_scalar("Metrics/mean_gt_count",     _m(gt_counts),     step)
 
         # ── per-density-bucket metrics ────────────────────────────────────────
-        for bucket in DENSITY_BUCKETS:
-            samples_b = density_samples[bucket]
-            if not samples_b:
-                continue
-            bp05, br05, bf05 = [], [], []
-            bp10, br10, bf10 = [], [], []
-            for s in samples_b:
-                pred, gt = s["pred"], s["gt_segs"]
-                if pred.shape[0] == 0 or gt.shape[0] == 0:
-                    continue
-                _p, _r, _f = segment_precision_recall_f1(pred, gt, 0.05)
-                bp05.append(_p.item()); br05.append(_r.item()); bf05.append(_f.item())
-                _p, _r, _f = segment_precision_recall_f1(pred, gt, 0.10)
-                bp10.append(_p.item()); br10.append(_r.item()); bf10.append(_f.item())
-            tag = f"Density/{bucket}"
-            tb.add_scalar(f"{tag}/F1_05",    _m(bf05), step)
-            tb.add_scalar(f"{tag}/F1_10",    _m(bf10), step)
-            tb.add_scalar(f"{tag}/prec_05",  _m(bp05), step)
-            tb.add_scalar(f"{tag}/rec_05",   _m(br05), step)
-            tb.add_scalar(f"{tag}/n_samples", len(samples_b), step)
+        # (Per-density-bucket metrics removed for clarity in TensorBoard)
 
         # ── visualisations ────────────────────────────────────────────────────
         # ── active-channel confusion matrix scalars ───────────────────────────
@@ -566,7 +526,7 @@ class VectorFlowLightningModule(pl.LightningModule):
 
         # ── fixed-crop sample grids (Train + Val) ─────────────────────────────
         for split, ds in [("Train", getattr(dm, "train_dataset", None)),
-                           ("Val",   getattr(dm, "val_dataset",   None))]:
+                   ("Val",   getattr(dm, "val_dataset",   None))]:
             if ds is None:
                 continue
             idx_dict = self._get_locked_grid_idx(split, ds)
@@ -633,12 +593,18 @@ class VectorFlowLightningModule(pl.LightningModule):
         ordered: sparse×2 → medium×2 → dense×2.
         """
         samples = []
-        for tier in ("sparse", "medium", "dense"):
-            for idx in idx_dict[tier]:
-                s       = dataset[idx]
+        for tier in ["sparse", "medium", "dense"]:
+            for idx in idx_dict.get(tier, []):
+                s = dataset[idx]
+                # Strictly skip any sample with no valid segments or missing sample_id
+                if s is None or s.get("sample_id", None) is None:
+                    continue
                 img     = s["image"].float().to(self.device).unsqueeze(0) / 255.0
                 gt_segs = s["road_data"].to(self.device).unsqueeze(0)
                 inv     = s["invalid_mask"].to(self.device).unsqueeze(0)
+                pre_densify_count = s.get("pre_densify_count", None)
+                post_densify_count = s.get("post_densify_count", None)
+                sample_id = s.get("sample_id", None)
 
                 if self.cfg.anchors.get("mode", "grid") == "gt_seeded":
                     x0 = self.anchors.generate_from_gt(gt_segs, inv)
@@ -668,6 +634,9 @@ class VectorFlowLightningModule(pl.LightningModule):
                     anc_matched = anc_idx,                      # [M] anchor indices
                     sample_idx  = idx,
                     tier        = tier,
+                    pre_densify_count = pre_densify_count,
+                    post_densify_count = post_densify_count,
+                    sample_id = sample_id,
                 ))
         return samples
 
@@ -725,16 +694,12 @@ class VectorFlowLightningModule(pl.LightningModule):
 
         def _draw_segs_ep(ax, segs, seg_c, ep_c, lw=2.0, alpha=0.88, ep_s=22):
             """Segments then endpoint dots; seg colour is always ≠ ep colour."""
-            if segs is None:
+            if segs is None or len(segs) == 0:
                 return
-            rows = segs.tolist() if torch.is_tensor(segs) else list(segs)
-            if not rows:
-                return
-            for x1, y1, x2, y2 in rows:
+            for s in segs:
+                x1, y1, x2, y2 = s
                 ax.plot([_p(x1), _p(x2)], [_p(y1), _p(y2)],
-                        color=seg_c, lw=lw, alpha=alpha,
-                        solid_capstyle="round", zorder=3)
-            for x1, y1, x2, y2 in rows:
+                        color=seg_c, lw=lw, alpha=alpha, solid_capstyle="round", zorder=4)
                 ax.scatter([_p(x1), _p(x2)], [_p(y1), _p(y2)],
                            color=ep_c, s=ep_s, zorder=5, linewidths=0)
 
@@ -748,14 +713,34 @@ class VectorFlowLightningModule(pl.LightningModule):
             sid      = data["sample_idx"]
             tier     = data["tier"]
 
-            # Crop ID label in the top-left corner of col 0
+            # Debug: log stats of predicted active channel
+            active_vals = x1p[:, 4].cpu().numpy()
+            print(f"[QualGrid] sample {sid} active min={active_vals.min():.3f} max={active_vals.max():.3f} mean={active_vals.mean():.3f} above0={(active_vals > 0).sum()} total={active_vals.size}")
+
+            # Crop ID label in the top-left corner of col 0, with segment counts
+            pre_count = data.get("pre_densify_count", None)
+            post_count = data.get("post_densify_count", None)
+            sample_id = data.get("sample_id", None)
+            label = f"{tier_labels[tier]}  #{sid}"
+            if sample_id is not None:
+                label += f"\nID: {sample_id}"
+            if pre_count is not None and post_count is not None:
+                label += f"\nGT segs: {pre_count} → {post_count}"
             axes[row_i, 0].text(
                 4, 10,
-                f"{tier_labels[tier]}  #{sid}",
-                fontsize=6, color="white",
+                label,
+                fontsize=6, color="black",
                 bbox=dict(boxstyle="round,pad=0.2", fc="black", alpha=0.55, lw=0),
                 va="top", zorder=10,
             )
+            # --- Improved: single-line, small, black font, only in 'Active Predictions' (col 5) ---
+            active_threshold = getattr(self, 'active_threshold', 0.7)
+            n_active = int((x1p[:, 4] > active_threshold).sum().item())
+            n_inactive = int((x1p[:, 4] <= active_threshold).sum().item())
+            n_gt = len(gt_segs)
+            # Place counts as a single line at the bottom of the title area in col 5
+            counts_str = f"A: {n_active} | I: {n_inactive} | GT: {n_gt}"
+            axes[row_i, 5].set_title(counts_str, fontsize=7, pad=2, color="black", loc="left")
 
             active_mask = x1p[:, 4] > self.active_threshold
             pred_active = x1p[active_mask]   # [Ma, 5]

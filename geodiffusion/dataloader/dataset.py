@@ -25,17 +25,17 @@ Road type filtering:
 from __future__ import annotations
 
 import csv
-import json
-import os
-import random
-from pathlib import Path
 
-os.environ.setdefault("PROJ_NETWORK", "OFF")
-os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "NO")
-os.environ.setdefault("GDAL_CACHEMAX", "512")
-os.environ.setdefault("GDAL_NUM_THREADS", "ALL_CPUS")
-os.environ.setdefault("VSI_CACHE", "TRUE")
-os.environ.setdefault("VSI_CACHE_SIZE", "25000000")
+import os
+import csv
+import json
+import random
+import warnings
+import torch
+import numpy as np
+import rasterio
+from pathlib import Path
+from rasterio.crs import CRS
 
 import rasterio
 from rasterio.crs import CRS
@@ -44,9 +44,9 @@ from rasterio.warp import transform as warp_transform
 import torch
 from torch.utils.data import Dataset
 
-from rich.console import Console
-
 from geodiffusion.preprocessing.densify import densify_segments
+
+
 
 VALID_HIGHWAY_TYPES: set[str] = frozenset({
     "motorway", "trunk", "primary", "secondary", "tertiary",
@@ -69,6 +69,8 @@ class VectorRoadDataset(Dataset):
         gsd_m: float = 1.0, # ground sampling distance in meters (used to convert max_segment_length from normalized [0,1] to pixel units)
         use_exclusion_csv: bool = False,
         exclusion_csv_path: str | None = None,
+        max_train_samples: int | None = None,
+        max_val_samples: int | None = None,
     ):
         self.data_root = data_root
         self.max_gt_segments = int(max_gt_segments)
@@ -79,16 +81,48 @@ class VectorRoadDataset(Dataset):
         self.split = split
         self.use_exclusion_csv = use_exclusion_csv
         self.exclusion_csv_path = exclusion_csv_path
+        self.max_train_samples = max_train_samples
+        self.max_val_samples = max_val_samples
 
         # ── locate split directory ────────────────────────────────────────────
         base = os.path.join(data_root, split)
 
+
         # ── index files ──────────────────────────────────────────────────────
         # Each satellite image <id>_sat.jpg is paired with <id>_osm.geojson in the same dir.
         paths = sorted(Path(base).glob("*_sat.jpg"))
-        self.sat_images = [str(p) for p in paths]
-        self.road_files = [str(p.with_name(p.stem.removesuffix("_sat") + "_osm.geojson")) for p in paths]
-        self.sample_ids = [p.stem.removesuffix("_sat") for p in paths]
+        all_sat_images = [str(p) for p in paths]
+        all_road_files = [str(p.with_name(p.stem.removesuffix("_sat") + "_osm.geojson")) for p in paths]
+        all_sample_ids = [p.stem.removesuffix("_sat") for p in paths]
+
+        # Assign all samples directly (no empty mask exclusion)
+        self.sat_images = all_sat_images
+        self.road_files = all_road_files
+        self.sample_ids = all_sample_ids
+        if split == "train":
+            max_samples = getattr(self, "max_train_samples", None)
+            if max_samples is None:
+                max_samples = int(os.environ.get("MAX_TRAIN_SAMPLES", 0)) or None
+            if max_samples is None:
+                max_samples = int(os.environ.get("max_train_samples", 0)) or None
+            if max_samples is None:
+                max_samples = None
+            if max_samples is not None and max_samples > 0:
+                self.sat_images = self.sat_images[:max_samples]
+                self.road_files = self.road_files[:max_samples]
+                self.sample_ids = self.sample_ids[:max_samples]
+        elif split == "val":
+            max_samples = getattr(self, "max_val_samples", None)
+            if max_samples is None:
+                max_samples = int(os.environ.get("MAX_VAL_SAMPLES", 0)) or None
+            if max_samples is None:
+                max_samples = int(os.environ.get("max_val_samples", 0)) or None
+            if max_samples is None:
+                max_samples = None
+            if max_samples is not None and max_samples > 0:
+                self.sat_images = self.sat_images[:max_samples]
+                self.road_files = self.road_files[:max_samples]
+                self.sample_ids = self.sample_ids[:max_samples]
 
         # ── filter counters ───────────────────────────────────────────────────
         self._n_removed_exclusion_csv = 0
@@ -97,7 +131,7 @@ class VectorRoadDataset(Dataset):
         if self.use_exclusion_csv:
             self._apply_exclusion_csv_filter()
 
-        # ── summary fields (used by data_module table) ────────────────────────
+        # ── summary fields (used by data_module table) ───────────────────────
         self._base = base
         self._seg_m = max_segment_length * image_size * gsd_m
 
@@ -130,28 +164,38 @@ class VectorRoadDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         with rasterio.open(self.sat_images[index]) as ds:
             data = ds.read()
-            segments = self._parse_roads(self.road_files[index], ds, data.shape[-1])
+            segments, pre_densify_count = self._parse_roads(self.road_files[index], ds, data.shape[-1], return_pre_count=True)
         assert data.shape[0] >= 3, f"Expected ≥3-channel image, got {data.shape[0]}"
         # Drop samples with no road annotations or more segments than the tensor
         # can hold — truncating would corrupt the GT (incomplete annotation is
         # worse than no annotation for matching-based losses).
         if not segments or len(segments) > self.max_gt_segments:
             effective_index = -1
+            post_densify_count = 0
+            sample_id = None
         else:
             effective_index = index
+            post_densify_count = len(segments)
+            sample_id = self.sample_ids[index]
         road_data, invalid_mask = self._pad_or_trim(segments if effective_index != -1 else [])
         return {
             "image":        torch.from_numpy(data[:3].copy()),
             "road_data":    torch.tensor(road_data,    dtype=torch.float32),
             "invalid_mask": torch.tensor(invalid_mask, dtype=torch.bool),
             "index":        effective_index,
+            "sample_id":    sample_id,
+            "pre_densify_count": pre_densify_count,
+            "post_densify_count": post_densify_count,
         }
 
     def _parse_roads(
-        self, road_path: str, ds, img_size: int
-    ) -> list[tuple[float, float, float, float]]:
-        """Parse roads GeoJSON into normalised (x1,y1,x2,y2) segments."""
+        self, road_path: str, ds, img_size: int, return_pre_count: bool = False
+    ) -> tuple[list[tuple[float, float, float, float]], int] | list[tuple[float, float, float, float]]:
+        """Parse roads GeoJSON into normalised (x1,y1,x2,y2) segments.
+        If return_pre_count is True, returns (segments, pre_densify_count)."""
         if not os.path.exists(road_path):
+            if return_pre_count:
+                return [], 0
             return []
         with open(road_path) as f:
             road_data = json.load(f)
@@ -187,6 +231,11 @@ class VectorRoadDataset(Dataset):
              max(-1.0, min(1.0, (y2 - half) / half)))
             for x1, y1, x2, y2 in raw_pixel
         ]
+        pre_densify_count = len([
+            seg for seg in norm
+            if (seg[2] - seg[0]) ** 2 + (seg[3] - seg[1]) ** 2 > 1e-8
+            and (seg[2] - seg[0]) ** 2 + (seg[3] - seg[1]) ** 2 <= 2.0
+        ])
         # Drop degenerate and artifact segments. Normalised length > √2 (~1.414)
         # means the segment spans more than the image half-diagonal — these are
         # reprojection artifacts whose clipped endpoints are not real road termini.
@@ -199,6 +248,8 @@ class VectorRoadDataset(Dataset):
         # Optionally densify (operates in normalised space)
         if self.densify:
             norm = densify_segments(norm, max_length=self.max_segment_length)
+        if return_pre_count:
+            return norm, pre_densify_count
         return norm
 
     @staticmethod

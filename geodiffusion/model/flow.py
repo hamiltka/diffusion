@@ -27,6 +27,7 @@ class FlowMatching(nn.Module):
     but it has no learnable parameters.
     """
 
+    # Interpolates between anchor and target positions at a given time t along the straight-line (OT) path.
     def interpolate(
         self,
         x0: torch.Tensor,  # [B, N, 5]  source (anchors)
@@ -41,6 +42,7 @@ class FlowMatching(nn.Module):
         t_ = t.view(-1, 1, 1)       # broadcast over N and 5
         return (1.0 - t_) * x0 + t_ * x1
 
+    # Computes the ground-truth constant velocity vector for the straight-line (OT) path between anchor and target.
     def velocity(
         self,
         x0: torch.Tensor,  # [B, N, 5]
@@ -48,11 +50,17 @@ class FlowMatching(nn.Module):
     ) -> torch.Tensor:
         """Ground-truth constant velocity along the straight-line path.
 
+        For the active channel (index 4), copy x1[..., 4] directly (do not difference).
+        For the other channels, use x1 - x0 as before.
+
         Returns:
             v: [B, N, 5]  — same at every t for OT paths
         """
-        return x1 - x0
+        v = x1 - x0
+        v[..., 4] = x1[..., 4]
+        return v
 
+    # Numerically integrates the predicted velocity field from t=0 to t=1 using Euler steps to obtain final positions.
     @torch.no_grad()
     def euler_integrate(
         self,
@@ -79,12 +87,24 @@ class FlowMatching(nn.Module):
         if device is None:
             device = x0.device
 
+        # Active channel (index 4) must NOT accumulate across Euler steps.
+        # Accumulation causes a runaway positive-feedback loop: the model sees
+        # x_t_active growing and responds with increasing velocity, driving all
+        # anchors to predict "active".  Instead we keep x_t_active = 0
+        # throughout integration (consistent with t=0 training regime) and
+        # record each step's v_pred_active, then average for the final score.
+        active_preds: list[torch.Tensor] = []
+
         for i in range(steps):
             t_val = i * dt
             t_tensor = torch.full((B,), t_val, dtype=torch.float32, device=device)
             v_pred = model(xt, t_tensor, image=image)
-            xt = xt + dt * v_pred
-            xt[..., :4] = xt[..., :4].clamp(-1.0, 1.0)  # keep coords in image bounds
+            # Update only position channels; leave active channel at 0
+            xt[..., :4] = (xt[..., :4] + dt * v_pred[..., :4]).clamp(-1.0, 1.0)
+            active_preds.append(v_pred[..., 4].clone())
+
+        # Final active score = mean predicted active velocity across all steps
+        xt[..., 4] = torch.stack(active_preds, dim=0).mean(dim=0)
         return xt
 
 

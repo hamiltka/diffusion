@@ -75,14 +75,18 @@ class VectorDiffusionDataModule(pl.LightningDataModule):
             use_exclusion_csv=bool(d.get("use_exclusion_csv", False)),
             exclusion_csv_path=d.get("exclusion_csv_path", None),
         )
+        # Pass subset limits from config
+        max_train_samples = getattr(d, "max_train_samples", None)
+        max_val_samples = getattr(d, "max_val_samples", None)
         if stage in ("fit", None):
-            self.train_dataset = VectorRoadDataset(split="train", **kwargs)
-            self.val_dataset = VectorRoadDataset(split="val", **kwargs)
+            self.train_dataset = VectorRoadDataset(split="train", max_train_samples=max_train_samples, **kwargs)
+            self.val_dataset = VectorRoadDataset(split="val", max_val_samples=max_val_samples, **kwargs)
             if os.environ.get("LOCAL_RANK", "0") == "0":
                 self._print_dataset_summary()
         elif stage == "validate" and self.val_dataset is None:
-            self.val_dataset = VectorRoadDataset(split="val", **kwargs)
+            self.val_dataset = VectorRoadDataset(split="val", max_val_samples=max_val_samples, **kwargs)
 
+    # Print a summary of the loaded datasets using rich tables, including counts and key properties.
     def _print_dataset_summary(self) -> None:
         # Convenience aliases for a compact table definition.
         tr = self.train_dataset
@@ -119,14 +123,10 @@ class VectorDiffusionDataModule(pl.LightningDataModule):
             num_workers=nw,
             collate_fn=_collate,
             worker_init_fn=_worker_init_fn if nw > 0 else None,
-            # Useful for host->GPU transfer latency; safe even when running on CPU.
-            pin_memory=True,
-            # Keep fixed batch shapes for DDP and stable optimization dynamics.
-            drop_last=True,
-            # Reuse worker processes across epochs to reduce startup overhead.
-            persistent_workers=nw > 0,
-            # forkserver avoids some deadlocks/resource inheritance issues vs fork.
-            multiprocessing_context="forkserver" if nw > 0 else None,
+            pin_memory=True, # Useful for host->GPU transfer latency; safe even when running on CPU.
+            drop_last=True, # Keep fixed batch shapes for DDP and stable optimization dynamics.
+            persistent_workers=nw > 0, # Reuse worker processes across epochs to reduce startup overhead.
+            multiprocessing_context="forkserver" if nw > 0 else None, # forkserver avoids some deadlocks/resource inheritance issues vs fork.
         )
 
     def train_dataloader(self) -> DataLoader:

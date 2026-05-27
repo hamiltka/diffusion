@@ -1,0 +1,37 @@
+# @package _global_
+# Overfit debug config: tiny subset for loss/model sanity check.
+
+defaults:
+  - _self_
+  - override /data: usgs_crops_512_trace_2_demo1k
+  - override /training: default
+  - override /anchors: spoke_wheel
+  - override /loss: default
+
+name: "overfit_debug"
+experiment_run_id: "overfit_debug"
+
+anchors:
+  mode: grid
+
+training:
+  lr: 1e-4
+  batch_size: 8
+  num_epochs: 200
+  num_workers: 8
+  n_metric_samples: 16
+  euler_steps_eval: 10
+  active_threshold: 0.0
+
+loss:
+  active_pos_weight: 30.0  # class imbalance correction
+  segment_weight: 3.0      # endpoint MSE (geometry)
+  active_weight: 2.0       # active-channel regression
+  connectivity_weight: 1.0 # shared-node convergence penalty
+
+data:
+  max_train_samples: 20   # tiny subset for overfit sanity check
+  max_val_samples: 20     # tiny subset for overfit sanity check
+  augment: false
+
+val_image_log_every_n_epochs: 1

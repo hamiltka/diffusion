@@ -1,0 +1,27 @@
+# @package _global_
+# Debugging config: small subset for fast iteration
+
+defaults:
+  - _self_
+  - override /data: usgs_crops_512_trace_2_demo1k
+  - override /training: default
+  - override /anchors: spoke_wheel
+  - override /loss: default
+
+name: "subset_debug"
+experiment_run_id: "subset_debug"
+
+training:
+  lr: 1e-4
+  batch_size: 8
+  num_epochs: 500
+  num_workers: 8
+  n_metric_samples: 16
+  euler_steps_eval: 2
+
+data:
+  max_train_samples: 200
+  max_val_samples: 100
+  augment: false
+
+val_image_log_every_n_epochs: 1

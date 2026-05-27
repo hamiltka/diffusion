@@ -105,6 +105,8 @@ class SpokeWheelAnchors:
         active = torch.zeros(B, N, device=device)
 
         anchors = torch.stack([p1x, p1y, p2x, p2y, active], dim=-1)  # [B, N, 5]
+        # Forcibly zero the active channel in case of any stack/casting issues
+        anchors[..., 4] = 0.0
         return anchors
 
     # ------------------------------------------------------------------
@@ -156,23 +158,29 @@ class SpokeWheelAnchors:
 
         # For each GT segment, select the spoke in its nearest cell whose tip
         # is closest to either GT endpoint (permutation-invariant, same metric
-        # as build_targets).  Since all K spokes in a cell share the same p1
-        # (cell centre), only the tip distance differs across k.
-        #
-        # near_tips: [B, N_gt, K, 2]
+        # as build_targets), but enforce one GT per spoke per cell.
         near_tips = spoke_tips[nearest_cell]                            # [B, N_gt, K, 2]
         gt_p1 = gt_segs[..., :2].unsqueeze(2)                          # [B, N_gt, 1, 2]
         gt_p2 = gt_segs[..., 2:4].unsqueeze(2)
         d_p1 = (near_tips - gt_p1).pow(2).sum(-1)                      # [B, N_gt, K]
         d_p2 = (near_tips - gt_p2).pow(2).sum(-1)
-        best_k   = torch.minimum(d_p1, d_p2).argmin(-1)                # [B, N_gt]
-        nearest  = nearest_cell * K + best_k                           # [B, N_gt]
 
-        # Mark matched spokes active=+1.
         for b in range(B):
             valid_idx = (~invalid_mask[b]).nonzero(as_tuple=True)[0]  # [M]
-            matched   = nearest[b, valid_idx]                         # [M] spoke indices
-            x0[b, matched, 4] = 1.0
+            used_spokes = {}  # cell idx -> set of used spoke idx
+            for idx in valid_idx:
+                cell = int(nearest_cell[b, idx])
+                # Mask out already used spokes in this cell
+                dists = torch.minimum(d_p1[b, idx], d_p2[b, idx]).clone()  # [K]
+                used = used_spokes.get(cell, set())
+                if used:
+                    for k in used:
+                        dists[k] = float('inf')
+                k = int(dists.argmin().item())
+                # Mark this spoke as used for this cell
+                used_spokes.setdefault(cell, set()).add(k)
+                spoke_idx = cell * K + k
+                x0[b, spoke_idx, 4] = 1.0
 
         return x0   # [B, N_anchors, 5]
 

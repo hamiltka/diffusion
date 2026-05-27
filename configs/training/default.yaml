@@ -7,8 +7,8 @@ weight_decay: 1e-5
 num_epochs: 200
 
 # DataLoader
-batch_size: 4
-num_workers: 4
+batch_size: 8
+num_workers: 8
 
 # Timestep embedding scale (t ∈ [0,1] multiplied by this before sinusoidal)
 timesteps: 1000   # scale factor, not discrete steps
@@ -21,4 +21,4 @@ lr_scheduler:
 # Comprehensive eval (Euler-integrated, runs every val_image_log_every_n_epochs)
 n_metric_samples: 16    # number of val images to evaluate with full Euler integration
 euler_steps_eval: 10   # Euler integration steps during eval (raised from 5 for more accurate endpoint positions)
-active_threshold: 0.0  # active-channel threshold for declaring a predicted anchor as active (0.0 = natural split between -1 and +1 targets)
+active_threshold: 0.0  # active-channel threshold: most permissive, any positive score counts as active

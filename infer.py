@@ -143,8 +143,15 @@ def run(args):
         print(f"  Unexpected keys: {unexpected[:5]}{'...' if len(unexpected) > 5 else ''}")
 
     module.eval().to(device)
+    anchor_mode = str(cfg.anchors.get("mode", "grid"))
+    if anchor_mode == "gt_seeded":
+        raise RuntimeError(
+            "Checkpoint config uses anchors.mode=gt_seeded, but infer.py has no GT anchors at test time. "
+            "Run inference with a checkpoint trained using anchors.mode=grid, or retrain with grid anchors."
+        )
     print(f"  Active threshold : {module.active_threshold}")
     print(f"  Euler steps      : {module.euler_steps_eval}")
+    print(f"  Anchor mode      : {anchor_mode}")
 
     # Collect input images
     input_dir = args.input_dir

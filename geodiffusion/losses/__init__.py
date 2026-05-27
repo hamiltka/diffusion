@@ -1,3 +1,3 @@
-from .losses import DistanceLoss, ActiveLoss, ConnectivityLoss, build_loss_fns
+from .losses import DistanceLoss, ActiveLoss, ConnectivityLoss
 
-__all__ = ["DistanceLoss", "ActiveLoss", "ConnectivityLoss", "build_loss_fns"]
+__all__ = ["DistanceLoss", "ActiveLoss", "ConnectivityLoss"]

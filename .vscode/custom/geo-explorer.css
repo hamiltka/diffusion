@@ -1,10 +1,10 @@
-/* All folders: hot pink, bold */
+/* Folders in explorer (hot pink, bold) */
 .explorer-viewlet .monaco-list-row:has(.monaco-tl-twistie.collapsible) .label-name {
   color: #ff69b4 !important;
   font-weight: 600 !important;
 }
 
-/* All files: neon green */
+/* Files in explorer (neon green) */
 .explorer-viewlet .monaco-list-row:not(:has(.monaco-tl-twistie.collapsible)) .label-name {
   color: #39ff14 !important;
 }

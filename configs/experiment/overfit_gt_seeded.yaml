@@ -19,11 +19,11 @@ anchors:
 
 training:
   lr: 1e-4
-  batch_size: 4
+  batch_size: 8
   num_epochs: 600
-  num_workers: 2
+  num_workers: 8
   n_metric_samples: 32
-  euler_steps_eval: 10
+  euler_steps_eval: 2
 
 data:
   max_train_samples: 32

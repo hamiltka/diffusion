@@ -12,50 +12,23 @@
   "material-icon-theme.opacity": 1,
 
   "workbench.colorCustomizations": {
-    // Title bar
-    "titleBar.activeBackground":   "#1a6b6b",
-    "titleBar.activeForeground":   "#e7f5f5",
-    "titleBar.inactiveBackground": "#144f4f",
-    "titleBar.inactiveForeground": "#7bbcbc",
-
-    // Status bar
-    "statusBar.background":               "#1a6b6b",
-    "statusBar.foreground":               "#e7f5f5",
-    "statusBar.debuggingBackground":      "#cc6600",
-    "statusBar.noFolderBackground":       "#2d2d2d",
-    "statusBarItem.remoteBackground":     "#0d4f4f",
-    "statusBarItem.remoteForeground":     "#e7f5f5",
-    "statusBarItem.hoverBackground":      "#1f8080",
-
-    // Activity bar (left icon strip)
-    "activityBar.background":             "#0f4444",
-    "activityBar.foreground":             "#e7f5f5",
-    "activityBar.inactiveForeground":     "#7bbcbc",
-    "activityBar.activeBorder":           "#41d1d1",
-    "activityBarBadge.background":        "#41d1d1",
-    "activityBarBadge.foreground":        "#0f4444",
-
-    // Explorer panel (sidebar)
-    "sideBar.background":                 "#0a2e2e",
-    "sideBar.foreground":                 "#cce8e8",
-    "sideBar.border":                     "#0f4444",
-    "sideBarTitle.foreground":            "#41d1d1",
-    "sideBarSectionHeader.background":    "#0f4444",
-    "sideBarSectionHeader.foreground":    "#41d1d1",
-    "sideBarSectionHeader.border":        "#1a6b6b",
-
-    // Explorer tree: folder labels bright teal, file labels softer
-    "list.activeSelectionBackground":     "#1a6b6b",
-    "list.activeSelectionForeground":     "#ffffff",
-    "list.inactiveSelectionBackground":   "#0f3d3d",
-    "list.inactiveSelectionForeground":   "#e7f5f5",
-    "list.hoverBackground":               "#0f3333",
-    "list.hoverForeground":               "#ffffff",
-    "list.focusBackground":               "#1a6b6b",
-    "list.focusForeground":               "#ffffff",
-    "list.highlightForeground":           "#41d1d1",
-
-    // File tree indent guides
-    "tree.indentGuidesStroke":            "#1a6b6b"
+    "statusBar.noFolderBackground": "#2d2d2d",
+    "activityBar.activeBorder": "#41d1d1",
+    "sideBar.background": "#0a2e2e",
+    "sideBar.foreground": "#cce8e8",
+    "sideBarTitle.foreground": "#41d1d1",
+    "sideBarSectionHeader.background": "#0f4444",
+    "sideBarSectionHeader.foreground": "#41d1d1",
+    "sideBarSectionHeader.border": "#1a6b6b",
+    "list.activeSelectionBackground": "#1a6b6b",
+    "list.activeSelectionForeground": "#ffffff",
+    "list.inactiveSelectionBackground": "#0f3d3d",
+    "list.inactiveSelectionForeground": "#e7f5f5",
+    "list.hoverBackground": "#0f3333",
+    "list.hoverForeground": "#ffffff",
+    "list.focusBackground": "#1a6b6b",
+    "list.focusForeground": "#ffffff",
+    "list.highlightForeground": "#41d1d1",
+    "tree.indentGuidesStroke": "#1a6b6b"
   }
 }

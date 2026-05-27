@@ -6,10 +6,10 @@ schedule_type: cosine        # cosine | linear | sqrt | sigmoid
 eval_timesteps: [0, 25, 50, 100, 150, 199]
 
 # Optimisation
-lr: 1.0e-4
+lr: 5.0e-5
 weight_decay: 1.0e-5
 num_epochs: 200
-batch_size: 4
+batch_size: 8
 num_workers: 4
 gradient_clipping: 1.0
 
@@ -18,9 +18,9 @@ lambda_mask: 1.0
 lambda_endpoint: 0.0
 
 # Endpoint snapping during training
-snap_endpoints: true
-snap_threshold: 0.02
-snap_mode: self
+snap_endpoints: false
+snap_threshold: 0.02  # (unused if snap_endpoints is false)
+snap_mode: self  # (unused if snap_endpoints is false)
 
 # Collinear segment merging (postprocess after snap)
 collinear_merge: true
